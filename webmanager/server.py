@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, "../")
 
 from flask import Flask, jsonify, send_from_directory, request, render_template
+from flask_socketio import SocketIO, emit
 
 try:
     from webmanager.helpfile import help_file, buildings
@@ -16,6 +17,7 @@ bm = BotManager()
 
 app = Flask(__name__)
 app.config["DEBUG"] = True
+socketio = SocketIO(app)
 
 
 def pre_process_bool(key, value, village_id=None):
@@ -201,6 +203,11 @@ def get_map():
     return render_template('map.html', data=sync_data, map=map_data)
 
 
+@app.route('/console', methods=['GET'])
+def console():
+    return render_template('console.html')
+
+
 @app.route('/villages', methods=['GET'])
 def get_village_overview():
     return render_template('villages.html', data=sync())
@@ -249,7 +256,28 @@ def config_set():
     return jsonify(sync())
 
 
+def _read_output():
+    while bm.is_running():
+        line = bm.proc.stdout.readline()
+        if not line:
+            break
+        socketio.emit('console_output', line)
+
+
+@socketio.on('connect')
+def _connect():
+    if bm.is_running():
+        socketio.start_background_task(_read_output)
+
+
+@socketio.on('console_input')
+def _console_input(data):
+    if bm.is_running():
+        os.write(bm.master_fd, data.encode())
+
+
 if len(sys.argv) > 1:
-    app.run(host="localhost", port=sys.argv[1])
+    socketio.run(app, host="localhost", port=sys.argv[1])
 else:
-    app.run()
+    socketio.run(app)
+
