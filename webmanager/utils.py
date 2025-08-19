@@ -2,6 +2,7 @@ import collections
 import json
 import os
 import subprocess
+import pty
 
 import psutil
 
@@ -186,6 +187,8 @@ class MapBuilder:
 
 class BotManager:
     pid = None
+    proc = None
+    master_fd = None
 
     def is_running(self):
         if not self.pid:
@@ -196,12 +199,25 @@ class BotManager:
         return False
 
     def start(self):
-        wd = os.path.join(os.path.dirname(__file__), "..")
-        proc = subprocess.Popen("python twb.py", cwd=wd, shell=True)
-        self.pid = proc.pid
+        wd = os.path.join(os.path.dirname(__file__), ".." )
+        master_fd, slave_fd = pty.openpty()
+        self.proc = subprocess.Popen(
+            ["python", "-u", "twb.py"],
+            cwd=wd,
+            stdin=slave_fd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        os.close(slave_fd)
+        self.master_fd = master_fd
+        self.pid = self.proc.pid
         print("Bot started successfully")
 
     def stop(self):
         if self.is_running():
-            os.kill(self.pid, sig=0)
+            self.proc.terminate()
+            self.proc.wait()
+            os.close(self.master_fd)
             print("Bot stopped successfully")
